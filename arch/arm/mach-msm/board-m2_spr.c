@@ -1050,8 +1050,9 @@ static void __init msm8960_reserve(void)
 {
 	msm8960_set_display_params(prim_panel_name, ext_panel_name);
 	msm_reserve();
-
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
 	add_persistent_ram();
+#endif
 
 #ifdef CONFIG_KEXEC_HARDBOOT
 	memblock_remove(KEXEC_HB_PAGE_ADDR, SZ_4K);
@@ -4416,6 +4417,7 @@ static struct platform_device *common_devices[] __initdata = {
 #endif
 	&msm8960_iommu_domain_device,
 	&msm_tsens_device,
+	&msm8960_cpu_slp_status,
 };
 
 static struct platform_device *m2_spr_devices[] __initdata = {
@@ -5310,8 +5312,9 @@ static void __init samsung_m2_spr_init(void)
 	msm8960_device_qup_spi_gsbi11.dev.platform_data =
 				&msm8960_qup_spi_gsbi11_pdata;
 #endif
-
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
 	add_ramconsole_devices();
+#endif
 
 #ifndef CONFIG_S5C73M3
 	spi_register_board_info(spi_board_info, ARRAY_SIZE(spi_board_info));

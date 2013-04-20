@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,6 +24,7 @@
 #include <linux/smp.h>
 #include <linux/suspend.h>
 #include <linux/tick.h>
+#include <linux/delay.h>
 #include <linux/platform_device.h>
 #include <mach/msm_iomap.h>
 #include <mach/socinfo.h>
@@ -52,6 +53,9 @@
 #include "timer.h"
 #include "pm-boot.h"
 #include <mach/event_timer.h>
+#ifdef CONFIG_SEC_DEBUG
+#include <mach/sec_debug.h>
+#endif
 
 /******************************************************************************
  * Debug Definitions
@@ -117,7 +121,8 @@ static char *msm_pm_sleep_mode_labels[MSM_PM_SLEEP_MODE_NR] = {
 
 static struct hrtimer pm_hrtimer;
 static struct msm_pm_sleep_ops pm_sleep_ops;
-static bool msm_pm_ldo_retention_enabled = true;
+static struct msm_pm_sleep_status_data *msm_pm_slp_sts;
+
 /*
  * Write out the attribute.
  */
@@ -519,6 +524,10 @@ static inline bool msm_pm_l2x0_power_collapse(void)
 }
 #endif
 
+#ifdef CONFIG_SEC_DEBUG
+static int debug_power_collaspe_status[2] = {0};
+#endif
+
 static bool __ref msm_pm_spm_power_collapse(
 	unsigned int cpu, bool from_idle, bool notify_rpm)
 {
@@ -549,8 +558,17 @@ static bool __ref msm_pm_spm_power_collapse(
 #ifdef CONFIG_VFP
 	vfp_pm_suspend();
 #endif
-	collapsed = msm_pm_l2x0_power_collapse();
 
+#ifdef CONFIG_SEC_DEBUG
+	debug_power_collaspe_status[smp_processor_id()] =
+			(from_idle<<8)|(notify_rpm<<4)|1;
+	secdbg_sched_msg("+pc(I:%d,R:%d)", from_idle, notify_rpm);
+#endif
+	collapsed = msm_pm_l2x0_power_collapse();
+#ifdef CONFIG_SEC_DEBUG
+	secdbg_sched_msg("-pc(%d)", collapsed);
+	debug_power_collaspe_status[smp_processor_id()] = 0;
+#endif
 	msm_pm_boot_config_after_pc(cpu);
 
 	if (collapsed) {
@@ -756,7 +774,7 @@ int msm_pm_idle_prepare(struct cpuidle_device *dev,
 {
 	int i;
 	unsigned int power_usage = -1;
-	int ret = MSM_PM_SLEEP_MODE_NOT_SELECTED;
+	int ret = 0;
 	uint32_t modified_time_us = 0;
 	struct msm_pm_time_params time_param;
 
@@ -797,14 +815,6 @@ int msm_pm_idle_prepare(struct cpuidle_device *dev,
 			}
 			/* fall through */
 		case MSM_PM_SLEEP_MODE_RETENTION:
-			/*
-			 * The Krait BHS regulator doesn't have enough head
-			 * room to drive the retention voltage on LDO and so
-			 * has disabled retention
-			 */
-			if (!msm_pm_ldo_retention_enabled)
-				break;
-
 			if (!allow)
 				break;
 
@@ -934,14 +944,9 @@ int msm_pm_idle_enter(enum msm_pm_sleep_mode sleep_mode)
 		break;
 	}
 
-	case MSM_PM_SLEEP_MODE_NOT_SELECTED:
-		goto cpuidle_enter_bail;
-		break;
-
 	default:
 		__WARN();
 		goto cpuidle_enter_bail;
-		break;
 	}
 
 	time = ktime_to_ns(ktime_get()) - time;
@@ -952,6 +957,32 @@ int msm_pm_idle_enter(enum msm_pm_sleep_mode sleep_mode)
 
 cpuidle_enter_bail:
 	return 0;
+}
+
+int msm_pm_wait_cpu_shutdown(unsigned int cpu)
+{
+	int timeout = 10;
+
+	if (!msm_pm_slp_sts)
+		return 0;
+	if (!msm_pm_slp_sts[cpu].base_addr)
+		return 0;
+	while (timeout--) {
+		/*
+ 		 * Check for the SPM of the core being hotplugged to set
+		 * its sleep state.The SPM sleep state indicates that the
+		 * core has been power collapsed.
+		*/
+		int acc_sts = __raw_readl(msm_pm_slp_sts[cpu].base_addr);
+
+		if (acc_sts & msm_pm_slp_sts[cpu].mask)
+			return 0;
+		udelay(100);
+	}
+
+	pr_info("%s(): Timed out waiting for CPU %u SPM to enter sleep state",
+			__func__, cpu);
+	return -EBUSY;
 }
 
 void msm_pm_cpu_enter_lowpower(unsigned int cpu)
@@ -978,39 +1009,6 @@ void msm_pm_cpu_enter_lowpower(unsigned int cpu)
 	else
 		msm_pm_swfi();
 }
-
-static void msm_pm_ack_retention_disable(void *data)
-{
-	/*
-	 * This is a NULL function to ensure that the core has woken up
-	 * and is safe to disable retention.
-	 */
-}
-/**
- * msm_pm_enable_retention() - Disable/Enable retention on all cores
- * @enable: Enable/Disable retention
- *
- */
-void msm_pm_enable_retention(bool enable)
-{
-	msm_pm_ldo_retention_enabled = enable;
-	/*
-	 * If retention is being disabled, wakeup all online core to ensure
-	 * that it isn't executing retention. Offlined cores need not be woken
-	 * up as they enter the deepest sleep mode, namely RPM assited power
-	 * collapse
-	 */
-	if (!enable) {
-		preempt_disable();
-		smp_call_function_many(cpu_online_mask,
-				msm_pm_ack_retention_disable,
-				NULL, true);
-		preempt_enable();
-
-
-	}
-}
-EXPORT_SYMBOL(msm_pm_enable_retention);
 
 static int msm_pm_enter(suspend_state_t state)
 {
@@ -1105,6 +1103,45 @@ enter_exit:
 static struct platform_suspend_ops msm_pm_ops = {
 	.enter = msm_pm_enter,
 	.valid = suspend_valid_only_mem,
+};
+
+static int __devinit msm_cpu_status_probe(struct platform_device *pdev)
+{
+	struct msm_pm_sleep_status_data *pdata;
+	u32 cpu;
+
+	if (!pdev)
+		return -EFAULT;
+
+	msm_pm_slp_sts =
+			kzalloc(sizeof(*msm_pm_slp_sts) * num_possible_cpus(),
+			GFP_KERNEL);
+
+	if (!msm_pm_slp_sts)
+		return -ENOMEM;
+	pdata = pdev->dev.platform_data;
+	if (!pdev->dev.platform_data)
+		goto fail_free_mem;
+
+	for_each_possible_cpu(cpu) {
+		msm_pm_slp_sts[cpu].base_addr =
+				pdata->base_addr + cpu * pdata->cpu_offset;
+		msm_pm_slp_sts[cpu].mask = pdata->mask;
+	}
+
+	return 0;
+
+fail_free_mem:
+	kfree(msm_pm_slp_sts);
+	return -EINVAL;
+};
+
+static struct platform_driver msm_cpu_status_driver = {
+	.probe = msm_cpu_status_probe,
+	.driver = {
+		.name = "cpu_slp_status",
+		.owner = THIS_MODULE,
+	},
 };
 
 /******************************************************************************
@@ -1227,6 +1264,7 @@ static int __init msm_pm_init(void)
 	msm_pm_target_init();
 	hrtimer_init(&pm_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 	msm_cpuidle_init();
+	platform_driver_register(&msm_cpu_status_driver);
 	platform_driver_register(&msm_pc_counter_driver);
 
 	return 0;

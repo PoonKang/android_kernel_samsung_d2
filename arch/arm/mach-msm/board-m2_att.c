@@ -1050,8 +1050,9 @@ static void __init msm8960_reserve(void)
 {
 	msm8960_set_display_params(prim_panel_name, ext_panel_name);
 	msm_reserve();
-
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
 	add_persistent_ram();
+#endif
 
 #ifdef CONFIG_KEXEC_HARDBOOT
 	memblock_remove(KEXEC_HB_PAGE_ADDR, SZ_4K);
@@ -3996,14 +3997,6 @@ static struct msm_rpm_platform_data msm_rpm_data = {
 };
 #endif
 
-#if 0
-static struct msm_pm_sleep_status_data msm_pm_slp_sts_data = {
-	.base_addr = MSM_ACC0_BASE + 0x08,
-	.cpu_offset = MSM_ACC1_BASE - MSM_ACC0_BASE,
-	.mask = 1UL << 13,
-};
-#endif
-
 #ifndef CONFIG_S5C73M3
 static struct ks8851_pdata spi_eth_pdata = {
 	.irq_gpio = KS8851_IRQ_GPIO,
@@ -4412,6 +4405,7 @@ static struct platform_device *common_devices[] __initdata = {
 #endif
 	&msm8960_iommu_domain_device,
 	&msm_tsens_device,
+	&msm8960_cpu_slp_status,
 };
 
 static struct platform_device *m2_att_devices[] __initdata = {
@@ -5293,8 +5287,9 @@ static void __init samsung_m2_att_init(void)
 	msm8960_device_qup_spi_gsbi11.dev.platform_data =
 				&msm8960_qup_spi_gsbi11_pdata;
 #endif
-
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
 	add_ramconsole_devices();
+#endif
 
 #ifndef CONFIG_S5C73M3
 	spi_register_board_info(spi_board_info, ARRAY_SIZE(spi_board_info));
