@@ -914,6 +914,8 @@ config MACH_M2
 	depends on ARCH_MSM8960
 	default n
 	select REGULATOR_MSM_GPIO
+	select MSM_IOMMU
+	select MSM_IOMMU_GPU_SYNC
         bool "MSM8960 Samsung M2"
         help
           Support for Samsung M2 devices.
@@ -2547,6 +2549,21 @@ config MSM_L1_ERR_PANIC
 
 	  For production builds, you should probably say 'N' here.
 
+config MSM_L1_RECOV_ERR_PANIC
+	bool "Panic on recoverable L1 cache errors"
+	depends on MSM_CACHE_ERP && MSM_L1_ERR_PANIC
+	help
+	  Certain CPU designs may be able to automatically recover from certain
+	  kinds of L1 cache errors, even though the L1 cache itself may not
+	  support error correction. These errors should not result in any kind
+	  of corruption, but their presence is nevertheless an indication of
+	  poor system health. To cause the kernel to panic whenever a
+	  recoverable L1 cache error is detected, say 'Y' here. This may be
+	  useful as a debugging technique if general system instability is
+	  suspected.
+
+	  For production builds, you should definitely say 'N' here.
+
 config MSM_L1_ERR_LOG
 	bool "Log CPU ERP events to system memory"
 	depends on MSM_CACHE_ERP
@@ -2676,11 +2693,5 @@ config MSM_USE_USER_ACCESSIBLE_TIMERS
 	help
 	  Enables MSM-specific user accessible timers via a shared
 	  memory page containing the cycle counter.
-
-config S5C73M3_DMA_TYPE2
-	bool "Use alternative DMA support for SPI camera interface"
-	depends on S5C73M3
-	help
-	  for use on d2cri and future devices
 
 endif

@@ -2447,13 +2447,8 @@ static struct resource resources_qup_spi_gsbi11[] = {
 	/*test: Qualcomm, DMA SPI, start */
 	{
 		.name	= "spidm_channels",
-#ifdef CONFIG_S5C73M3_DMA_TYPE2
 		.start	= 3,
 		.end	= 4,
-#else
-		.start	= 9,
-		.end	= 10,
-#endif
 		.flags	= IORESOURCE_DMA,
 	},
 	{
@@ -4487,6 +4482,26 @@ struct platform_device msm8960_device_cache_erp = {
 struct msm_iommu_domain_name msm8960_iommu_ctx_names[] = {
 	/* Camera */
 	{
+		.name = "vpe_src",
+		.domain = CAMERA_DOMAIN,
+	},
+	/* Camera */
+	{
+		.name = "vpe_dst",
+		.domain = CAMERA_DOMAIN,
+	},
+	/* Camera */
+	{
+		.name = "vfe_imgwr",
+		.domain = CAMERA_DOMAIN,
+	},
+	/* Camera */
+	{
+		.name = "vfe_misc",
+		.domain = CAMERA_DOMAIN,
+	},
+	/* Camera */
+	{
 		.name = "ijpeg_src",
 		.domain = CAMERA_DOMAIN,
 	},
@@ -4550,13 +4565,13 @@ static struct mem_pool msm8960_video_pools[] =  {
 	/* Main video pool */
 		{
 			.paddr	= SZ_16M,
-			.size	= SZ_256M - SZ_16M,
+			.size	= SZ_512M - SZ_16M,
 		},
 	[GEN_POOL] =
 	/* Remaining address space up to 2G */
 		{
-			.paddr	= SZ_256M,
-			.size	= SZ_2G - SZ_256M,
+			.paddr	= SZ_512M,
+			.size	= SZ_2G - SZ_512M,
 		},
 };
 
